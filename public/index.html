@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Neon Snake · 联机版</title>
+  <style>
+    :root{
+      --bg:#070a14;
+      --panel:#0f1633;
+      --text:#eaf0ff;
+      --muted:#9aa6d6;
+      --grid:#1a2450;
+      --grid2:#22306b;
+      --food:#fb7185;
+      --shadow: 0 24px 70px rgba(0,0,0,.45);
+      --danger:#fb7185;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif;
+      background:
+        radial-gradient(900px 600px at 15% 10%, rgba(74,222,128,.16), transparent 60%),
+        radial-gradient(1000px 700px at 85% 20%, rgba(251,113,133,.12), transparent 55%),
+        radial-gradient(1200px 900px at 30% 95%, rgba(99,102,241,.10), transparent 60%),
+        linear-gradient(180deg, #070a14 0%, #060812 100%);
+      color:var(--text);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: clamp(14px, 2.5vw, 26px);
+      padding-bottom: max(16px, env(safe-area-inset-bottom));
+    }
+    .wrap{ width:min(980px, 100%); display:grid; gap:14px; }
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+      border:1px solid color-mix(in oklab, var(--grid2) 70%, white 30%);
+      border-radius:18px;
+      overflow:hidden;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    header{
+      padding:14px 16px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      border-bottom:1px solid rgba(34,48,107,.65);
+      background: linear-gradient(180deg, rgba(15,22,51,.85), rgba(11,16,32,.55));
+    }
+    header h1{ font-size:15px; margin:0; letter-spacing:.5px; }
+    .stats{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:13px; color:var(--muted); }
+    .pill{ padding:6px 10px; border-radius:999px; border:1px solid rgba(34,48,107,.75); background: rgba(255,255,255,.04); color:var(--text); font-variant-numeric: tabular-nums; white-space:nowrap; }
+
+    .row{ padding:14px; display:grid; gap:12px; }
+    canvas{ width:100%; height:auto; display:block; border-radius:14px; border:1px solid rgba(34,48,107,.75); background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01)); touch-action:none; }
+
+    .panel{ display:grid; gap:10px; padding:12px; border:1px solid rgba(34,48,107,.65); border-radius:14px; background: rgba(0,0,0,.20); }
+    .grid{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    label{ font-size:12px; color:var(--muted); display:grid; gap:6px; }
+    input, select, button{
+      border:1px solid rgba(34,48,107,.85);
+      background: rgba(255,255,255,.05);
+      color:var(--text);
+      padding:10px 12px;
+      border-radius:12px;
+      font-size:13px;
+    }
+    button{ cursor:pointer; }
+    button:hover{ background: rgba(255,255,255,.08); }
+    button.primary{ border-color: rgba(34,197,94,.45); background: linear-gradient(180deg, rgba(34,197,94,.22), rgba(34,197,94,.10)); }
+
+    .actions{ display:flex; gap:10px; flex-wrap:wrap; }
+    .hint{ font-size:12px; color:var(--muted); line-height:1.6; }
+
+    .players{ display:grid; gap:6px; }
+    .p{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 10px; border:1px solid rgba(34,48,107,.55); border-radius:12px; background: rgba(255,255,255,.03); font-variant-numeric: tabular-nums; }
+    .left{ display:flex; align-items:center; gap:8px; }
+    .dot{ width:10px; height:10px; border-radius:999px; background: #4ade80; }
+    .small{ color:var(--muted); font-size:12px; }
+
+    .toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background: rgba(0,0,0,.62); border:1px solid rgba(255,255,255,.12); color:var(--text); padding:10px 12px; border-radius:14px; font-size:13px; display:none; backdrop-filter: blur(10px); max-width:min(640px, 92vw); text-align:center; z-index:10; }
+    .toast.show{ display:block; }
+
+    @media (max-width: 820px){
+      .grid{ grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <header>
+        <h1>Neon Snake · 联机版（2~4人）</h1>
+        <div class="stats">
+          <div class="pill">房间：<span id="roomCode">—</span></div>
+          <div class="pill">时间：<span id="timeLeft">—</span></div>
+          <div class="pill">状态：<span id="status">未连接</span></div>
+        </div>
+      </header>
+
+      <div class="row">
+        <canvas id="game" width="640" height="640"></canvas>
+
+        <div class="panel">
+          <div class="grid">
+            <label>昵称
+              <input id="name" placeholder="比如：小明" maxlength="16" />
+            </label>
+            <label>颜色
+              <select id="color">
+                <option value="green">绿色</option>
+                <option value="blue">蓝色</option>
+                <option value="purple">紫色</option>
+                <option value="orange">橙色</option>
+                <option value="pink">粉色</option>
+              </select>
+            </label>
+            <label>房间码（加入用）
+              <input id="code" placeholder="例如 ABCD1" maxlength="5" />
+            </label>
+            <label> 
+              <div class="actions">
+                <button class="primary" id="btnCreate">创建房间</button>
+                <button id="btnJoin">加入房间</button>
+                <button id="btnStart">开始 2 分钟</button>
+              </div>
+            </label>
+          </div>
+
+          <div class="players" id="players"></div>
+
+          <div class="hint">
+            操作：方向键/WASD。规则：撞墙或撞到任意蛇身体会死亡，2 秒后复活；吃食物 +10。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const GRID = 20;
+  const CELL = 32;
+
+  const elRoomCode = document.getElementById('roomCode');
+  const elTimeLeft = document.getElementById('timeLeft');
+  const elStatus = document.getElementById('status');
+  const elPlayers = document.getElementById('players');
+  const toast = document.getElementById('toast');
+
+  const inpName = document.getElementById('name');
+  const inpColor = document.getElementById('color');
+  const inpCode = document.getElementById('code');
+
+  const btnCreate = document.getElementById('btnCreate');
+  const btnJoin = document.getElementById('btnJoin');
+  const btnStart = document.getElementById('btnStart');
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  const COLORS = {
+    grid1: css('--grid'),
+    grid2: css('--grid2'),
+    food: css('--food'),
+    text: css('--text'),
+  };
+
+  function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+  const themes = {
+    green:  {a:'#4ade80', b:'#22c55e'},
+    blue:   {a:'#60a5fa', b:'#3b82f6'},
+    purple: {a:'#a78bfa', b:'#8b5cf6'},
+    orange: {a:'#fb923c', b:'#f97316'},
+    pink:   {a:'#fb7185', b:'#f43f5e'},
+  };
+
+  function showToast(msg, ms=1200){
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => toast.classList.remove('show'), ms);
+  }
+
+  // ===== Network =====
+  const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+  const ws = new WebSocket(wsUrl);
+
+  const state = {
+    you: { id: null },
+    room: null,
+    last: null,
+  };
+
+  ws.addEventListener('open', () => {
+    elStatus.textContent = '已连接';
+  });
+  ws.addEventListener('close', () => {
+    elStatus.textContent = '已断开';
+  });
+  ws.addEventListener('message', (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.t === 'hello') {
+      state.you.id = msg.id;
+      return;
+    }
+    if (msg.t === 'error') {
+      showToast(msg.message || '出错');
+      return;
+    }
+    if (msg.t === 'joined' || msg.t === 'players' || msg.t === 'room' || msg.t === 'ended') {
+      state.room = msg.room;
+      renderRoom();
+      return;
+    }
+    if (msg.t === 'state') {
+      state.last = msg;
+      renderGame(msg);
+      renderRoomLight(msg);
+      return;
+    }
+    if (msg.t === 'death') {
+      if (msg.id === state.you.id) showToast('你死了，2秒后复活');
+      return;
+    }
+  });
+
+  function send(obj){ ws.send(JSON.stringify(obj)); }
+
+  btnCreate.addEventListener('click', () => {
+    send({ t:'create', name: inpName.value || '玩家', color: inpColor.value });
+  });
+  btnJoin.addEventListener('click', () => {
+    send({ t:'join', code: (inpCode.value||'').trim().toUpperCase(), name: inpName.value || '玩家', color: inpColor.value });
+  });
+  btnStart.addEventListener('click', () => {
+    send({ t:'start' });
+  });
+
+  // ===== Input =====
+  function setDir(dx,dy){
+    send({ t:'input', dir:{x:dx,y:dy} });
+  }
+  window.addEventListener('keydown', (e) => {
+    const k = e.key.toLowerCase();
+    if (k==='arrowup' || k==='w'){ e.preventDefault(); setDir(0,-1); }
+    else if (k==='arrowdown' || k==='s'){ e.preventDefault(); setDir(0,1); }
+    else if (k==='arrowleft' || k==='a'){ e.preventDefault(); setDir(-1,0); }
+    else if (k==='arrowright' || k==='d'){ e.preventDefault(); setDir(1,0); }
+  }, {passive:false});
+
+  // ===== UI =====
+  function renderRoom(){
+    if (!state.room) return;
+    elRoomCode.textContent = state.room.code;
+    elStatus.textContent = state.room.state === 'running' ? '进行中' : state.room.state === 'ended' ? '已结束' : '大厅';
+    elTimeLeft.textContent = state.room.endsAt ? fmtMs(Math.max(0, state.room.endsAt - Date.now())) : '—';
+
+    const ps = state.room.players || [];
+    elPlayers.innerHTML = ps.map(p => {
+      const dot = themes[p.color]?.a || '#4ade80';
+      const alive = p.alive ? '' : '（复活中）';
+      return `<div class="p"><div class="left"><span class="dot" style="background:${dot}"></span><div>${escapeHtml(p.name)} <span class="small">${alive}</span></div></div><div>${p.score}</div></div>`;
+    }).join('');
+  }
+
+  function renderRoomLight(tick){
+    if (!state.room) return;
+    elTimeLeft.textContent = tick.endsAt ? fmtMs(Math.max(0, tick.endsAt - Date.now())) : '—';
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function fmtMs(ms){
+    const s = Math.ceil(ms/1000);
+    const m = Math.floor(s/60);
+    const r = s%60;
+    return `${m}:${String(r).padStart(2,'0')}`;
+  }
+
+  // ===== Render =====
+  function renderGame(msg){
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0,0,w,h);
+
+    // grid
+    for (let i=0;i<=GRID;i++){
+      const p = i*CELL;
+      ctx.strokeStyle = i%5===0 ? COLORS.grid2 : COLORS.grid1;
+      ctx.globalAlpha = i%5===0 ? 0.45 : 0.22;
+      ctx.beginPath(); ctx.moveTo(p,0); ctx.lineTo(p,GRID*CELL); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0,p); ctx.lineTo(GRID*CELL,p); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // food
+    if (msg.food){
+      drawCell(msg.food.x, msg.food.y, COLORS.food, 18);
+    }
+
+    // snakes
+    for (const p of msg.players){
+      const t = themes[p.color] || themes.green;
+      if (!p.snake || !p.snake.length) continue;
+      for (let i=0;i<p.snake.length;i++){
+        const c = i===p.snake.length-1 ? t.b : t.a;
+        drawCell(p.snake[i].x, p.snake[i].y, c, 18);
+      }
+    }
+
+    // leaderboard overlay
+    drawHud(msg.players);
+  }
+
+  function drawCell(x,y,color,shadow=0){
+    const px=x*CELL, py=y*CELL;
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = shadow;
+    const grad = ctx.createLinearGradient(px, py, px+CELL, py+CELL);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, 'rgba(255,255,255,.08)');
+    ctx.fillStyle = grad;
+    roundRect(px+4, py+4, CELL-8, CELL-8, 12);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function roundRect(x,y,w,h,r){
+    const rr=Math.min(r,w/2,h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rr,y);
+    ctx.arcTo(x+w,y,x+w,y+h,rr);
+    ctx.arcTo(x+w,y+h,x,y+h,rr);
+    ctx.arcTo(x,y+h,x,y,rr);
+    ctx.arcTo(x,y,x+w,y,rr);
+    ctx.closePath();
+  }
+
+  function drawHud(players){
+    const sorted=[...players].sort((a,b)=>b.score-a.score);
+    ctx.save();
+    ctx.fillStyle='rgba(0,0,0,.35)';
+    ctx.fillRect(8,8,220, 18+sorted.length*16);
+    ctx.font='12px ui-sans-serif, system-ui';
+    ctx.fillStyle='rgba(234,240,255,.92)';
+    ctx.fillText('排名', 16, 22);
+    for (let i=0;i<sorted.length;i++){
+      const p=sorted[i];
+      const dot = themes[p.color]?.a || '#4ade80';
+      ctx.fillStyle=dot; ctx.fillRect(16, 34+i*16-8, 8, 8);
+      ctx.fillStyle='rgba(234,240,255,.92)';
+      const name = (p.id===state.you.id?'你·':'') + p.name;
+      ctx.fillText(`${i+1}. ${name}`, 30, 34+i*16);
+      ctx.fillText(String(p.score), 200, 34+i*16);
+    }
+    ctx.restore();
+  }
+
+  // animate time-left even if no ticks yet
+  setInterval(() => {
+    if (state.room?.endsAt) elTimeLeft.textContent = fmtMs(Math.max(0, state.room.endsAt - Date.now()));
+  }, 250);
+})();
+</script>
+</body>
+</html>
