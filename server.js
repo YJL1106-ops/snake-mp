@@ -51,6 +51,7 @@ function createRoom() {
     tickHandle: null,
 
     food: null,
+    tick: 0,
 
     players: new Map(), // id -> player
     inputs: new Map(),  // id -> {dir}
@@ -210,6 +211,7 @@ function applyInput(p, inputDir) {
 function tick(room) {
   if (room.state !== 'running') return;
 
+  room.tick++;
   const t = now();
   if (room.endsAt && t >= room.endsAt) {
     endRound(room);
@@ -274,6 +276,7 @@ function tick(room) {
     t: 'state',
     now: t,
     endsAt: room.endsAt,
+    tick: room.tick,
     food: room.food,
     players: [...room.players.values()].map(p => ({
       id: p.id,

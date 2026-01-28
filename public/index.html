@@ -198,6 +198,7 @@
   const GRID = 20;
   const LOGICAL_SIZE = 640; // fixed internal resolution, scaled by CSS
   const CELL = LOGICAL_SIZE / GRID;
+  const TICK_MS_FALLBACK = 50;
 
   const SINGLE_URL = 'https://yjl1106-ops.github.io/snake/';
 
@@ -324,7 +325,7 @@
       }
     }
 
-    renderState(tick){
+    renderState(tick, predict){
       this.dynG.clear();
       this.uiG.clear();
 
@@ -339,13 +340,17 @@
         this.drawCell(tick.food.x, tick.food.y, 0xfb7185, 1.0, true);
       }
 
-      // snakes
+      // snakes (use predicted for self)
       for (const p of tick.players){
         const th = themes[p.color] || themes.green;
-        if (!p.snake || !p.snake.length) continue;
-        for (let i=0;i<p.snake.length;i++){
-          const c = (i === p.snake.length-1) ? th.b : th.a;
-          this.drawCell(p.snake[i].x, p.snake[i].y, c, 1.0, false);
+        let snake = p.snake;
+        if (predict?.enabled && p.id === window.__YOU_ID && predict.snake) {
+          snake = predict.snake;
+        }
+        if (!snake || !snake.length) continue;
+        for (let i=0;i<snake.length;i++){
+          const c = (i === snake.length-1) ? th.b : th.a;
+          this.drawCell(snake[i].x, snake[i].y, c, 1.0, false);
         }
       }
     }
@@ -388,6 +393,8 @@
   const game = new Phaser.Game(config);
 
   function scene(){ return game.scene.getScene('main'); }
+  // expose for Scene render override
+  window.__YOU_ID = null;
 
   // ===== Network =====
   const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
@@ -399,9 +406,21 @@
     tick: null,
     tickHz: null,
     lastRecvAt: 0,
-    lastSendAt: 0,
-    lastPingSentAt: 0,
-    rttMs: null,
+  };
+
+  // Client-side prediction (local feel)
+  const predict = {
+    enabled: true,
+    tickHz: 20,
+    tickMs: TICK_MS_FALLBACK,
+    running: false,
+    alive: true,
+    dir: {x: 1, y: 0},
+    snake: null,
+    food: null,
+    timer: null,
+    lastServerTick: 0,
+    lastStepAt: performance.now(),
   };
 
   function wsReady(){ return ws.readyState === WebSocket.OPEN; }
@@ -434,7 +453,10 @@
 
     if (msg.t === 'hello') {
       net.youId = msg.id;
+      window.__YOU_ID = msg.id;
       net.tickHz = msg.tickHz;
+      predict.tickHz = msg.tickHz || 20;
+      predict.tickMs = 1000 / predict.tickHz;
       elTickHz.textContent = String(msg.tickHz);
       return;
     }
@@ -449,9 +471,25 @@
     }
     if (msg.t === 'state') {
       net.tick = msg;
+      predict.food = msg.food;
+      predict.lastServerTick = msg.tick || predict.lastServerTick;
+
+      // sync our authoritative state occasionally (hard correct if drift is too big)
+      const me = msg.players.find(p => p.id === net.youId);
+      if (me) {
+        if (!predict.snake || !predict.snake.length || (msg.tick && msg.tick % 5 === 0)) {
+          // periodic correction
+          predict.snake = (me.snake || []).map(s => ({x:s.x,y:s.y}));
+          predict.alive = !!me.alive;
+          predict.dir = me.dir || predict.dir;
+        }
+      }
+
+      ensurePredictLoop();
+
       renderRoomLight(msg);
-      // render quickly without creating/destroying sprites
-      scene()?.renderState?.(msg);
+      // render quickly (override self with predicted)
+      scene()?.renderState?.(msg, predict);
       updateHud(msg.players);
       return;
     }
@@ -463,6 +501,10 @@
 
   // ===== Controls =====
   function setDir(dx,dy){
+    // local immediate response
+    if (!(dx === -predict.dir.x && dy === -predict.dir.y)) {
+      predict.dir = {x:dx,y:dy};
+    }
     // send immediately (server applies on next tick)
     send({ t:'input', dir:{x:dx,y:dy} });
   }
@@ -502,10 +544,48 @@
   }
 
   function updateHud(players){
-    const sorted=[...players].sort((a,b)=>b.score-a.score);
     // latency: approximate based on last recv time to now (not true RTT); still useful to see stutter.
     const age = performance.now() - net.lastRecvAt;
     elLatency.textContent = isFinite(age) ? `${Math.round(age)}ms` : '—';
+  }
+
+  function ensurePredictLoop(){
+    if (!predict.enabled) return;
+    if (predict.timer) return;
+    predict.timer = setInterval(() => {
+      // only simulate when round is running
+      if (!net.room || net.room.state !== 'running') return;
+      if (!predict.snake || predict.snake.length === 0) return;
+
+      // step once per interval
+      const head = predict.snake[predict.snake.length - 1];
+      const nx = head.x + predict.dir.x;
+      const ny = head.y + predict.dir.y;
+
+      // wall collision (local)
+      if (nx < 0 || ny < 0 || nx >= GRID || ny >= GRID) {
+        // freeze until server corrects / respawns
+        predict.snake = [];
+        return;
+      }
+
+      // self collision (local)
+      const body = predict.snake.slice(1); // allow moving into tail when not eating
+      const willEat = predict.food && nx === predict.food.x && ny === predict.food.y;
+      const check = willEat ? predict.snake : body;
+      if (check.some(p => p.x === nx && p.y === ny)) {
+        predict.snake = [];
+        return;
+      }
+
+      predict.snake.push({x:nx,y:ny});
+      if (!willEat) {
+        predict.snake.shift();
+      }
+
+      // render (no wait for server)
+      if (net.tick) scene()?.renderState?.(net.tick, predict);
+    }, predict.tickMs);
   }
 
   // refresh timer
