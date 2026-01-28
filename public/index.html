@@ -412,15 +412,15 @@
   const predict = {
     enabled: true,
     tickHz: 20,
-    tickMs: TICK_MS_FALLBACK,
-    running: false,
-    alive: true,
+    tickMs: TICK_MS_FALLBACK, // step duration (ms) based on cps
     dir: {x: 1, y: 0},
     snake: null,
     food: null,
-    timer: null,
-    lastServerTick: 0,
-    lastStepAt: performance.now(),
+
+    // RAF-based accumulator (less jitter than setInterval)
+    rafId: null,
+    accMs: 0,
+    lastNow: performance.now(),
   };
 
   function wsReady(){ return ws.readyState === WebSocket.OPEN; }
@@ -476,7 +476,8 @@
         const newMs = 1000 / msg.cps;
         if (Math.abs(newMs - predict.tickMs) > 1) {
           predict.tickMs = newMs;
-          if (predict.timer) { clearInterval(predict.timer); predict.timer = null; }
+          // reset accumulator to reduce "shake" when speed changes
+          predict.accMs = 0;
         }
       }
       predict.lastServerTick = msg.tick || predict.lastServerTick;
@@ -484,11 +485,23 @@
       // sync our authoritative state occasionally (hard correct if drift is too big)
       const me = msg.players.find(p => p.id === net.youId);
       if (me) {
-        if (!predict.snake || !predict.snake.length || (msg.tick && msg.tick % 5 === 0)) {
-          // periodic correction
-          predict.snake = (me.snake || []).map(s => ({x:s.x,y:s.y}));
-          predict.alive = !!me.alive;
+        const serverSnake = (me.snake || []).map(s => ({x:s.x,y:s.y}));
+
+        // if we have no local state, sync immediately
+        if (!predict.snake || predict.snake.length === 0) {
+          predict.snake = serverSnake;
           predict.dir = me.dir || predict.dir;
+          predict.accMs = 0;
+        } else {
+          // correct only when drift is obvious (prevents visible "shake")
+          const lh = predict.snake[predict.snake.length-1];
+          const sh = serverSnake[serverSnake.length-1];
+          const drift = (!lh || !sh) ? 0 : (Math.abs(lh.x-sh.x) + Math.abs(lh.y-sh.y));
+          if (drift >= 2 || predict.snake.length !== serverSnake.length) {
+            predict.snake = serverSnake;
+            predict.dir = me.dir || predict.dir;
+            predict.accMs = 0;
+          }
         }
       }
 
@@ -556,43 +569,61 @@
     elLatency.textContent = isFinite(age) ? `${Math.round(age)}ms` : '—';
   }
 
+  function predictStepOnce(){
+    if (!predict.snake || predict.snake.length === 0) return;
+
+    const head = predict.snake[predict.snake.length - 1];
+    const nx = head.x + predict.dir.x;
+    const ny = head.y + predict.dir.y;
+
+    // wall collision (local): stop predicting until server corrects
+    if (nx < 0 || ny < 0 || nx >= GRID || ny >= GRID) {
+      predict.snake = [];
+      return;
+    }
+
+    // self collision (local)
+    const willEat = predict.food && nx === predict.food.x && ny === predict.food.y;
+    const bodyToCheck = willEat ? predict.snake : predict.snake.slice(1);
+    if (bodyToCheck.some(p => p.x === nx && p.y === ny)) {
+      predict.snake = [];
+      return;
+    }
+
+    predict.snake.push({x:nx,y:ny});
+    if (!willEat) predict.snake.shift();
+  }
+
   function ensurePredictLoop(){
     if (!predict.enabled) return;
-    if (predict.timer) return;
-    predict.timer = setInterval(() => {
+    if (predict.rafId) return;
+
+    predict.lastNow = performance.now();
+    const loop = () => {
+      predict.rafId = requestAnimationFrame(loop);
+
       // only simulate when round is running
       if (!net.room || net.room.state !== 'running') return;
       if (!predict.snake || predict.snake.length === 0) return;
 
-      // step once per interval
-      const head = predict.snake[predict.snake.length - 1];
-      const nx = head.x + predict.dir.x;
-      const ny = head.y + predict.dir.y;
+      const now = performance.now();
+      let dt = now - predict.lastNow;
+      predict.lastNow = now;
 
-      // wall collision (local)
-      if (nx < 0 || ny < 0 || nx >= GRID || ny >= GRID) {
-        // freeze until server corrects / respawns
-        predict.snake = [];
-        return;
+      // cap dt to avoid huge jumps (tab switch)
+      dt = Math.min(dt, predict.tickMs * 3);
+      predict.accMs += dt;
+
+      while (predict.accMs >= predict.tickMs) {
+        predictStepOnce();
+        predict.accMs -= predict.tickMs;
       }
 
-      // self collision (local)
-      const body = predict.snake.slice(1); // allow moving into tail when not eating
-      const willEat = predict.food && nx === predict.food.x && ny === predict.food.y;
-      const check = willEat ? predict.snake : body;
-      if (check.some(p => p.x === nx && p.y === ny)) {
-        predict.snake = [];
-        return;
-      }
-
-      predict.snake.push({x:nx,y:ny});
-      if (!willEat) {
-        predict.snake.shift();
-      }
-
-      // render (no wait for server)
+      // render predicted self immediately
       if (net.tick) scene()?.renderState?.(net.tick, predict);
-    }, predict.tickMs);
+    };
+
+    predict.rafId = requestAnimationFrame(loop);
   }
 
   // refresh timer
