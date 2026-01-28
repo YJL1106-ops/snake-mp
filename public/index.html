@@ -434,6 +434,11 @@
   };
 
   // Client-side prediction (local feel)
+  // We also do simple reconciliation using input sequence numbers (prevents "turn then snap back").
+  let inputSeq = 0;
+  /** @type {{seq:number, dir:{x:number,y:number}}[]} */
+  let pendingInputs = [];
+
   const predict = {
     enabled: true,
     tickHz: 20,
@@ -528,28 +533,25 @@
       }
       predict.lastServerTick = msg.tick || predict.lastServerTick;
 
-      // sync our authoritative state occasionally (hard correct if drift is too big)
+      // reconcile self state using server ackSeq + our pending inputs
       const me = msg.players.find(p => p.id === net.youId);
       if (me) {
-        const serverSnake = (me.snake || []).map(s => ({x:s.x,y:s.y}));
+        const ack = typeof me.ackSeq === 'number' ? me.ackSeq : 0;
+        pendingInputs = pendingInputs.filter(it => it.seq > ack);
 
-        // If we have no local state, sync immediately.
-        // NOTE: do NOT overwrite predict.dir on every packet; that causes "turn then snap back".
-        if (!predict.snake || predict.snake.length === 0) {
-          predict.snake = serverSnake;
-          if (me.dir) predict.dir = me.dir;
-          predict.accMs = 0;
-        } else {
-          // correct only when drift is obvious (prevents visible "shake")
-          const lh = predict.snake[predict.snake.length-1];
-          const sh = serverSnake[serverSnake.length-1];
-          const drift = (!lh || !sh) ? 0 : (Math.abs(lh.x-sh.x) + Math.abs(lh.y-sh.y));
-          if (drift >= 4 || predict.snake.length !== serverSnake.length) {
-            predict.snake = serverSnake;
-            // keep local predict.dir; server dir lags behind by network/tick
-            predict.accMs = 0;
-          }
+        const serverSnake = (me.snake || []).map(s => ({x:s.x,y:s.y}));
+        // Always snap predicted snake to authoritative snake on each state.
+        // Then pick direction: if we have unacked inputs, keep the latest local dir (prevents snap-back).
+        predict.snake = serverSnake;
+
+        if (pendingInputs.length) {
+          predict.dir = pendingInputs[pendingInputs.length - 1].dir;
+        } else if (me.dir) {
+          predict.dir = me.dir;
         }
+
+        // Reset accumulator so the next predicted step starts cleanly from this authoritative state.
+        predict.accMs = 0;
       }
 
       ensurePredictLoop();
@@ -569,11 +571,17 @@
   // ===== Controls =====
   function setDir(dx,dy){
     // local immediate response
-    if (!(dx === -predict.dir.x && dy === -predict.dir.y)) {
-      predict.dir = {x:dx,y:dy};
-    }
+    if (dx === -predict.dir.x && dy === -predict.dir.y) return;
+
+    const dir = {x:dx,y:dy};
+    predict.dir = dir;
+
+    // sequence + pending queue (reconciliation)
+    const seq = ++inputSeq;
+    pendingInputs.push({ seq, dir });
+
     // send immediately (server applies on next tick)
-    send({ t:'input', dir:{x:dx,y:dy} });
+    send({ t:'input', seq, dir });
   }
 
   // Capture direction keys even when an input is focused (prevents "can't turn" feeling)
@@ -592,8 +600,17 @@
   }, {passive:false, capture:true});
 
   // ===== UI actions =====
-  btnCreate.addEventListener('click', () => send({ t:'create', name: inpName.value || '玩家', color: inpColor.value }));
-  btnJoin.addEventListener('click', () => send({ t:'join', code: (inpCode.value||'').trim().toUpperCase(), name: inpName.value || '玩家', color: inpColor.value }));
+  btnCreate.addEventListener('click', () => {
+    // reset input sequence on new session
+    inputSeq = 0;
+    pendingInputs = [];
+    send({ t:'create', name: inpName.value || '玩家', color: inpColor.value });
+  });
+  btnJoin.addEventListener('click', () => {
+    inputSeq = 0;
+    pendingInputs = [];
+    send({ t:'join', code: (inpCode.value||'').trim().toUpperCase(), name: inpName.value || '玩家', color: inpColor.value });
+  });
   btnStart.addEventListener('click', () => send({ t:'start' }));
 
   function renderRoom(){

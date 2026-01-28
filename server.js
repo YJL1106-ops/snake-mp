@@ -59,7 +59,7 @@ function createRoom() {
     moveAcc: 0,
 
     players: new Map(), // id -> player
-    inputs: new Map(),  // id -> {dir}
+    inputs: new Map(),  // id -> {dir, seq}
   };
 
   rooms.set(code, room);
@@ -84,6 +84,7 @@ function roomSnapshot(room) {
       respawnAt: p.respawnAt,
       snake: p.snake,
       dir: p.dir,
+      ackSeq: p.lastSeq || 0,
     }))
   };
 }
@@ -276,7 +277,10 @@ function tick(room) {
   for (const p of room.players.values()) {
     if (!p.alive) continue;
     const inp = room.inputs.get(p.id);
-    if (inp?.dir) applyInput(p, inp.dir);
+    if (inp?.dir) {
+      applyInput(p, inp.dir);
+      if (typeof inp.seq === 'number' && inp.seq > (p.lastSeq || 0)) p.lastSeq = inp.seq;
+    }
   }
 
   // fixed movement speed independent from tick rate
@@ -290,7 +294,10 @@ function tick(room) {
     for (const p of room.players.values()) {
       if (!p.alive) continue;
       const inp = room.inputs.get(p.id);
-      if (inp?.dir) applyInput(p, inp.dir);
+      if (inp?.dir) {
+        applyInput(p, inp.dir);
+        if (typeof inp.seq === 'number' && inp.seq > (p.lastSeq || 0)) p.lastSeq = inp.seq;
+      }
     }
 
     moveStep(room);
@@ -312,6 +319,7 @@ function tick(room) {
       respawnAt: p.respawnAt,
       snake: p.snake,
       dir: p.dir,
+      ackSeq: p.lastSeq || 0,
       color: p.color,
       name: p.name,
     }))
@@ -377,7 +385,8 @@ wss.on('connection', (ws) => {
         alive: true,
         respawnAt: null,
         snake: [],
-        dir: { x: 1, y: 0 }
+        dir: { x: 1, y: 0 },
+        lastSeq: 0,
       };
       room.players.set(id, player);
       const sp = safeSpawn(room);
@@ -406,7 +415,8 @@ wss.on('connection', (ws) => {
         alive: true,
         respawnAt: null,
         snake: [],
-        dir: { x: 1, y: 0 }
+        dir: { x: 1, y: 0 },
+        lastSeq: 0,
       };
       room.players.set(id, player);
       const sp = safeSpawn(room);
@@ -437,7 +447,10 @@ wss.on('connection', (ws) => {
       // store last direction per player
       const dir = msg.dir;
       if (dir && typeof dir.x === 'number' && typeof dir.y === 'number') {
-        joinedRoom.inputs.set(id, { dir: { x: clamp(dir.x, -1, 1), y: clamp(dir.y, -1, 1) } });
+        const seq = typeof msg.seq === 'number' ? msg.seq : 0;
+        joinedRoom.inputs.set(id, { dir: { x: clamp(dir.x, -1, 1), y: clamp(dir.y, -1, 1) }, seq });
+        const p = joinedRoom.players.get(id);
+        if (p && seq > (p.lastSeq || 0)) p.lastSeq = seq;
       }
       return;
     }
