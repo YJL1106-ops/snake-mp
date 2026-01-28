@@ -357,16 +357,17 @@
       // snakes (use predicted for self)
       for (const p of tick.players){
         const th = themes[p.color] || themes.green;
+        const isSelf = (predict?.enabled && p.id === window.__YOU_ID);
+
         let snake = p.snake;
         const dir = p.dir || {x:0,y:0};
-        const phase = (predict?.enabled && p.id === window.__YOU_ID) ? selfPhase : otherPhase;
 
-        // Use predicted snake + predicted dir for self (smooth turns)
-        const drawDir = (predict?.enabled && p.id === window.__YOU_ID) ? (predict.dir || dir) : dir;
+        // For self we already render a fully predicted snake (with immediate turns).
+        // Do NOT apply extra interpolation offset to self; it can cause "turn then snap back".
+        const phase = isSelf ? 0 : otherPhase;
+        const drawDir = isSelf ? (predict.dir || dir) : dir;
 
-        if (predict?.enabled && p.id === window.__YOU_ID && predict.snake) {
-          snake = predict.snake;
-        }
+        if (isSelf && predict.snake) snake = predict.snake;
         if (!snake || !snake.length) continue;
 
         for (let i=0;i<snake.length;i++){
@@ -532,20 +533,20 @@
       if (me) {
         const serverSnake = (me.snake || []).map(s => ({x:s.x,y:s.y}));
 
-        // if we have no local state, sync immediately
+        // If we have no local state, sync immediately.
+        // NOTE: do NOT overwrite predict.dir on every packet; that causes "turn then snap back".
         if (!predict.snake || predict.snake.length === 0) {
           predict.snake = serverSnake;
-          predict.dir = me.dir || predict.dir;
+          if (me.dir) predict.dir = me.dir;
           predict.accMs = 0;
         } else {
           // correct only when drift is obvious (prevents visible "shake")
           const lh = predict.snake[predict.snake.length-1];
           const sh = serverSnake[serverSnake.length-1];
           const drift = (!lh || !sh) ? 0 : (Math.abs(lh.x-sh.x) + Math.abs(lh.y-sh.y));
-          // Too-frequent hard snaps cause "shake". Be more tolerant and only hard-correct on big drift.
           if (drift >= 4 || predict.snake.length !== serverSnake.length) {
             predict.snake = serverSnake;
-            predict.dir = me.dir || predict.dir;
+            // keep local predict.dir; server dir lags behind by network/tick
             predict.accMs = 0;
           }
         }
