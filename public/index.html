@@ -456,7 +456,7 @@
       window.__YOU_ID = msg.id;
       net.tickHz = msg.tickHz;
       predict.tickHz = msg.tickHz || 20;
-      predict.tickMs = 1000 / predict.tickHz;
+      predict.tickMs = 1000 / (msg.cps || 7.5);
       elTickHz.textContent = String(msg.tickHz);
       return;
     }
@@ -472,6 +472,13 @@
     if (msg.t === 'state') {
       net.tick = msg;
       predict.food = msg.food;
+      if (msg.cps) {
+        const newMs = 1000 / msg.cps;
+        if (Math.abs(newMs - predict.tickMs) > 1) {
+          predict.tickMs = newMs;
+          if (predict.timer) { clearInterval(predict.timer); predict.timer = null; }
+        }
+      }
       predict.lastServerTick = msg.tick || predict.lastServerTick;
 
       // sync our authoritative state occasionally (hard correct if drift is too big)

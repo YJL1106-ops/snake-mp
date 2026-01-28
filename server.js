@@ -34,6 +34,9 @@ const TICK_HZ = 20;
 const TICK_MS = 1000 / TICK_HZ;
 const ROUND_MS = 120_000;
 
+// Movement speed (cells per second). You can tune this.
+const BASE_CPS = 7.5;
+
 // ===== Rooms =====
 /** @type {Map<string, any>} */
 const rooms = new Map();
@@ -52,6 +55,8 @@ function createRoom() {
 
     food: null,
     tick: 0,
+    cps: BASE_CPS,
+    moveAcc: 0,
 
     players: new Map(), // id -> player
     inputs: new Map(),  // id -> {dir}
@@ -68,6 +73,7 @@ function roomSnapshot(room) {
     startedAt: room.startedAt,
     endsAt: room.endsAt,
     grid: GRID,
+    cps: room.cps,
     food: room.food,
     players: [...room.players.values()].map(p => ({
       id: p.id,
@@ -208,26 +214,7 @@ function applyInput(p, inputDir) {
   p.dir = inputDir;
 }
 
-function tick(room) {
-  if (room.state !== 'running') return;
-
-  room.tick++;
-  const t = now();
-  if (room.endsAt && t >= room.endsAt) {
-    endRound(room);
-    return;
-  }
-
-  // respawn
-  for (const p of room.players.values()) maybeRespawn(room, p);
-
-  // apply latest inputs
-  for (const p of room.players.values()) {
-    if (!p.alive) continue;
-    const inp = room.inputs.get(p.id);
-    if (inp?.dir) applyInput(p, inp.dir);
-  }
-
+function moveStep(room) {
   // compute next heads
   const next = [];
   for (const p of room.players.values()) {
@@ -252,7 +239,7 @@ function tick(room) {
       continue;
     }
 
-    // body collision (including other snakes; since tails also move, this is a simplified rule)
+    // body collision (including other snakes)
     if (body.has(m.x + ',' + m.y)) {
       killPlayer(room, p, 'body');
       continue;
@@ -270,13 +257,44 @@ function tick(room) {
       p.snake.shift();
     }
   }
+}
 
-  // broadcast state (compact)
+function tick(room) {
+  if (room.state !== 'running') return;
+
+  room.tick++;
+  const t = now();
+  if (room.endsAt && t >= room.endsAt) {
+    endRound(room);
+    return;
+  }
+
+  // respawn
+  for (const p of room.players.values()) maybeRespawn(room, p);
+
+  // apply latest inputs
+  for (const p of room.players.values()) {
+    if (!p.alive) continue;
+    const inp = room.inputs.get(p.id);
+    if (inp?.dir) applyInput(p, inp.dir);
+  }
+
+  // fixed movement speed independent from tick rate
+  room.moveAcc += TICK_MS / 1000;
+  const step = 1 / room.cps;
+  room.moveAcc = Math.min(room.moveAcc, step * 4);
+  while (room.moveAcc >= step) {
+    moveStep(room);
+    room.moveAcc -= step;
+  }
+
+  // broadcast state
   const snapshot = {
     t: 'state',
     now: t,
     endsAt: room.endsAt,
     tick: room.tick,
+    cps: room.cps,
     food: room.food,
     players: [...room.players.values()].map(p => ({
       id: p.id,
@@ -331,7 +349,7 @@ wss.on('connection', (ws) => {
 
   let joinedRoom = null;
 
-  send(ws, { t: 'hello', id, grid: GRID, tickHz: TICK_HZ, roundMs: ROUND_MS });
+  send(ws, { t: 'hello', id, grid: GRID, tickHz: TICK_HZ, roundMs: ROUND_MS, cps: BASE_CPS });
 
   ws.on('message', (buf) => {
     let msg;
