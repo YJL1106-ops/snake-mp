@@ -540,18 +540,33 @@
         pendingInputs = pendingInputs.filter(it => it.seq > ack);
 
         const serverSnake = (me.snake || []).map(s => ({x:s.x,y:s.y}));
-        // Always snap predicted snake to authoritative snake on each state.
-        // Then pick direction: if we have unacked inputs, keep the latest local dir (prevents snap-back).
-        predict.snake = serverSnake;
 
+        // Pick direction:
+        // - if we have unacked inputs, trust the latest local dir (prevents snap-back)
+        // - otherwise follow server dir
         if (pendingInputs.length) {
           predict.dir = pendingInputs[pendingInputs.length - 1].dir;
         } else if (me.dir) {
           predict.dir = me.dir;
         }
 
-        // Reset accumulator so the next predicted step starts cleanly from this authoritative state.
-        predict.accMs = 0;
+        // IMPORTANT: don't hard-snap snake every packet; that causes visible jitter on public networks.
+        // Only snap when drift is clearly wrong.
+        if (!predict.snake || predict.snake.length === 0) {
+          predict.snake = serverSnake;
+          predict.accMs = 0;
+        } else {
+          const lh = predict.snake[predict.snake.length - 1];
+          const sh = serverSnake[serverSnake.length - 1];
+          const drift = (!lh || !sh) ? 0 : (Math.abs(lh.x - sh.x) + Math.abs(lh.y - sh.y));
+          const lenDiff = (predict.snake.length !== serverSnake.length);
+
+          // snap threshold: be conservative; we only correct when it's clearly off
+          if (drift >= 3 || lenDiff) {
+            predict.snake = serverSnake;
+            predict.accMs = 0;
+          }
+        }
       }
 
       ensurePredictLoop();
