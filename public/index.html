@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Neon Snake · 联机版（Phaser像素风）</title>
+  <title>Neon Snake · 联机版</title>
+  <meta name="theme-color" content="#070a14" />
   <style>
     :root{
       --bg:#070a14;
@@ -12,9 +13,7 @@
       --muted:#9aa6d6;
       --grid:#1a2450;
       --grid2:#22306b;
-      --food:#fb7185;
       --shadow: 0 24px 70px rgba(0,0,0,.45);
-      --danger:#fb7185;
     }
     *{ box-sizing:border-box; }
     body{
@@ -32,7 +31,7 @@
       padding: clamp(14px, 2.5vw, 26px);
       padding-bottom: max(16px, env(safe-area-inset-bottom));
     }
-    .wrap{ width:min(1020px, 100%); display:grid; gap:14px; }
+    .wrap{ width:min(1100px, 100%); display:grid; gap:14px; }
     .card{
       background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
       border:1px solid color-mix(in oklab, var(--grid2) 70%, white 30%);
@@ -56,6 +55,7 @@
     .pill{ padding:6px 10px; border-radius:999px; border:1px solid rgba(34,48,107,.75); background: rgba(255,255,255,.04); color:var(--text); font-variant-numeric: tabular-nums; white-space:nowrap; }
 
     .row{ padding:14px; display:grid; gap:12px; }
+
     #gameContainer{
       width:100%;
       aspect-ratio: 1 / 1;
@@ -65,22 +65,6 @@
       overflow:hidden;
       position:relative;
       touch-action:none;
-    }
-    #hudOverlay{
-      position:absolute;
-      left:10px;
-      top:10px;
-      padding:8px 10px;
-      border-radius:12px;
-      border:1px solid rgba(34,48,107,.55);
-      background: rgba(0,0,0,.35);
-      font-size:12px;
-      color: rgba(234,240,255,.92);
-      backdrop-filter: blur(6px);
-      display:grid;
-      gap:6px;
-      min-width: 220px;
-      pointer-events:none;
     }
 
     .panel{ display:grid; gap:10px; padding:12px; border:1px solid rgba(34,48,107,.65); border-radius:14px; background: rgba(0,0,0,.20); }
@@ -97,6 +81,7 @@
     button{ cursor:pointer; }
     button:hover{ background: rgba(255,255,255,.08); }
     button.primary{ border-color: rgba(34,197,94,.45); background: linear-gradient(180deg, rgba(34,197,94,.22), rgba(34,197,94,.10)); }
+    button:disabled{ opacity:.55; cursor:not-allowed; }
 
     .actions{ display:flex; gap:10px; flex-wrap:wrap; }
     .hint{ font-size:12px; color:var(--muted); line-height:1.6; }
@@ -106,6 +91,26 @@
     .left{ display:flex; align-items:center; gap:8px; }
     .dot{ width:10px; height:10px; border-radius:999px; background: #4ade80; }
     .small{ color:var(--muted); font-size:12px; }
+
+    .overlay{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+      background: rgba(0,0,0,.35);
+      backdrop-filter: blur(8px);
+    }
+    .modal{
+      width:min(560px, 92vw);
+      border-radius:16px;
+      border:1px solid rgba(34,48,107,.65);
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(10px);
+      padding:14px;
+      box-shadow: 0 24px 70px rgba(0,0,0,.55);
+    }
 
     .toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background: rgba(0,0,0,.62); border:1px solid rgba(255,255,255,.12); color:var(--text); padding:10px 12px; border-radius:14px; font-size:13px; display:none; backdrop-filter: blur(10px); max-width:min(640px, 92vw); text-align:center; z-index:10; }
     .toast.show{ display:block; }
@@ -121,32 +126,26 @@
       <header>
         <h1>Neon Snake</h1>
         <div class="stats">
-          <div class="pill">模式：<span id="mode">联机</span></div>
+          <div class="pill">模式：<span id="mode">—</span></div>
           <div class="pill">房间：<span id="roomCode">—</span></div>
           <div class="pill">时间：<span id="timeLeft">—</span></div>
           <div class="pill">状态：<span id="status">未连接</span></div>
+          <div class="pill">延迟：<span id="latency">—</span></div>
+          <div class="pill">Tick：<span id="tickHz">—</span></div>
         </div>
       </header>
 
       <div class="row">
         <div id="gameContainer" aria-label="Game">
-          <div id="hudOverlay">
-            <div><b>排名</b></div>
-            <div id="hudList" style="display:grid; gap:4px;"></div>
-          </div>
-
-          <div id="modeModal" style="position:absolute; inset:0; display:none; align-items:center; justify-content:center; padding:18px;">
-            <div style="width:min(520px, 92vw); border-radius:16px; border:1px solid rgba(34,48,107,.65); background: rgba(0,0,0,.55); backdrop-filter: blur(10px); padding:14px; box-shadow: 0 24px 70px rgba(0,0,0,.55);">
-              <div style="font-weight:800; font-size:16px; letter-spacing:.4px;">选择模式</div>
+          <div id="modeOverlay" class="overlay" style="display:none;">
+            <div class="modal">
+              <div style="font-weight:900; font-size:18px; letter-spacing:.4px;">选择模式</div>
               <div style="margin-top:8px; color:rgba(154,166,214,.95); font-size:12px; line-height:1.6;">
-                单机适合练手；联机可以和朋友 2~4 人同局。
+                单机适合练手；联机支持 2~4 人同局。联机需要网络，延迟高会影响手感。
               </div>
               <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
                 <button id="btnModeSingle" style="flex:1 1 180px;" class="primary">单机模式</button>
                 <button id="btnModeMulti" style="flex:1 1 180px;">联机模式</button>
-              </div>
-              <div style="margin-top:10px; color:rgba(154,166,214,.9); font-size:12px; line-height:1.6;">
-                提示：你也可以直接用链接参数：<span class="small">?mode=single</span> 或 <span class="small">?mode=multi</span>
               </div>
             </div>
           </div>
@@ -169,7 +168,7 @@
             <label>房间码（加入用）
               <input id="code" placeholder="例如 ABCD1" maxlength="5" />
             </label>
-            <label> 
+            <label>
               <div class="actions">
                 <button class="primary" id="btnCreate">创建房间</button>
                 <button id="btnJoin">加入房间</button>
@@ -181,8 +180,8 @@
           <div class="players" id="players"></div>
 
           <div class="hint">
-            操作：方向键/WASD。规则：撞墙或撞到任意蛇身体会死亡，2 秒后复活；吃食物 +10。
-            <br/>像素风由 Phaser 渲染，移动/碰撞仍由服务器权威判定。
+            电脑：方向键 / WASD。手机：在棋盘上滑动。
+            <br/>说明：联机版“权威判定在服务器”，所以会受网络延迟影响；我会继续做客户端预测来接近本地手感。
           </div>
         </div>
       </div>
@@ -197,13 +196,19 @@
 <script>
 (() => {
   const GRID = 20;
+  const LOGICAL_SIZE = 640; // fixed internal resolution, scaled by CSS
+  const CELL = LOGICAL_SIZE / GRID;
+
+  const SINGLE_URL = 'https://yjl1106-ops.github.io/snake/';
 
   const elMode = document.getElementById('mode');
   const elRoomCode = document.getElementById('roomCode');
   const elTimeLeft = document.getElementById('timeLeft');
   const elStatus = document.getElementById('status');
+  const elLatency = document.getElementById('latency');
+  const elTickHz = document.getElementById('tickHz');
+
   const elPlayers = document.getElementById('players');
-  const elHudList = document.getElementById('hudList');
   const toast = document.getElementById('toast');
 
   const inpName = document.getElementById('name');
@@ -214,51 +219,18 @@
   const btnJoin = document.getElementById('btnJoin');
   const btnStart = document.getElementById('btnStart');
 
-  const container = document.getElementById('gameContainer');
-
-  // Mode selection (single vs multiplayer)
-  const SINGLE_URL = 'https://yjl1106-ops.github.io/snake/';
-  const qs = new URLSearchParams(location.search);
-  const selectedMode = (qs.get('mode') || '').toLowerCase();
-
-  const modeModal = document.getElementById('modeModal');
+  const modeOverlay = document.getElementById('modeOverlay');
   const btnModeSingle = document.getElementById('btnModeSingle');
   const btnModeMulti = document.getElementById('btnModeMulti');
 
-  function showModePicker(){
-    modeModal.style.display = 'flex';
-    elMode.textContent = '未选择';
-  }
-  function chooseMulti(){
-    modeModal.style.display = 'none';
-    elMode.textContent = '联机';
-  }
-
-  if (selectedMode === 'single') {
-    location.replace(SINGLE_URL);
-  } else if (selectedMode === 'multi') {
-    chooseMulti();
-  } else {
-    showModePicker();
-  }
-
-  btnModeSingle.addEventListener('click', () => {
-    location.href = SINGLE_URL;
-  });
-  btnModeMulti.addEventListener('click', () => {
-    // keep URL clean but remember
-    const u = new URL(location.href);
-    u.searchParams.set('mode','multi');
-    history.replaceState(null,'',u.toString());
-    chooseMulti();
-  });
+  const container = document.getElementById('gameContainer');
 
   const themes = {
-    green:  {a:'#4ade80', b:'#22c55e'},
-    blue:   {a:'#60a5fa', b:'#3b82f6'},
-    purple: {a:'#a78bfa', b:'#8b5cf6'},
-    orange: {a:'#fb923c', b:'#f97316'},
-    pink:   {a:'#fb7185', b:'#f43f5e'},
+    green:  {a:0x4ade80, b:0x22c55e},
+    blue:   {a:0x60a5fa, b:0x3b82f6},
+    purple: {a:0xa78bfa, b:0x8b5cf6},
+    orange: {a:0xfb923c, b:0xf97316},
+    pink:   {a:0xfb7185, b:0xf43f5e},
   };
 
   function showToast(msg, ms=1200){
@@ -279,45 +251,48 @@
     return `${m}:${String(r).padStart(2,'0')}`;
   }
 
-  // ===== Phaser scene =====
-  const gameState = {
-    youId: null,
-    room: null,
-    lastTick: null,
-  };
+  // ===== Mode picker =====
+  const qs = new URLSearchParams(location.search);
+  const selectedMode = (qs.get('mode') || '').toLowerCase();
+  function chooseMulti(){
+    modeOverlay.style.display = 'none';
+    elMode.textContent = '联机';
+  }
+  function showMode(){
+    modeOverlay.style.display = 'flex';
+    elMode.textContent = '未选择';
+  }
+  if (selectedMode === 'single') {
+    location.replace(SINGLE_URL);
+  } else if (selectedMode === 'multi') {
+    chooseMulti();
+  } else {
+    showMode();
+  }
+  btnModeSingle.addEventListener('click', () => { location.href = SINGLE_URL; });
+  btnModeMulti.addEventListener('click', () => {
+    const u = new URL(location.href);
+    u.searchParams.set('mode','multi');
+    history.replaceState(null,'',u.toString());
+    chooseMulti();
+  });
 
-  let CELL = 32; // computed after resize
-  let originX = 0;
-  let originY = 0;
-
+  // ===== Phaser =====
   class MainScene extends Phaser.Scene {
     constructor(){ super('main'); }
 
-    preload(){
-      // generate tiny pixel textures (no external assets)
-      this.makePixel('food', '#fb7185');
-      this.makePixel('shadow', '#000000', 0.0);
-
-      // per theme
-      for (const [k,v] of Object.entries(themes)){
-        this.makePixel(`snake_${k}_a`, v.a);
-        this.makePixel(`snake_${k}_b`, v.b);
-      }
-
-      // grid tile
-      this.makeGridTextures();
-    }
-
     create(){
-      this.graphics = this.add.graphics();
+      this.cameras.main.setBackgroundColor(0x060812);
+      this.cameras.main.setRoundPixels(true);
 
-      this.sprites = new Map(); // key -> sprite
+      this.gridG = this.add.graphics();
+      this.dynG = this.add.graphics();
+      this.uiG = this.add.graphics();
 
-      this.resize();
-      // Avoid infinite recursion: we don't call this.scale.resize() from inside resize handler.
-      this.scale.on('resize', () => this.resize(false));
+      this.drawGrid();
 
-      // pointer/touch: swipe input
+      // touch swipe
+      this._touchStart = null;
       this.input.on('pointerdown', (p) => { this._touchStart = {x:p.x, y:p.y, t:performance.now()}; });
       this.input.on('pointerup', (p) => {
         if (!this._touchStart) return;
@@ -327,7 +302,6 @@
         const dt = performance.now() - this._touchStart.t;
         this._touchStart = null;
 
-        // tap: do nothing (could start/pause in future)
         if (adx < 10 && ady < 10 && dt < 250) return;
         if (Math.max(adx, ady) < 22) return;
         if (adx > ady) setDir(dx > 0 ? 1 : -1, 0);
@@ -335,170 +309,108 @@
       });
     }
 
-    resize(requestCanvasResize=true){
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      // keep square canvas
-      const size = Math.floor(Math.min(w, h));
-
-      // Only resize the canvas when size actually changes.
-      // IMPORTANT: do NOT call this.scale.resize() from inside the scale 'resize' event.
-      if (!this._lastSize) this._lastSize = 0;
-      if (requestCanvasResize && size > 0 && size !== this._lastSize){
-        // Use the Game ScaleManager, not the Scene ScalePlugin, to avoid recursive resize events.
-        this.sys.game.scale.resize(size, size);
-        this._lastSize = size;
-      }
-
-      const canvasSize = this.sys.game.scale.gameSize;
-      const cw = canvasSize.width;
-      const ch = canvasSize.height;
-
-      CELL = Math.max(8, Math.floor(Math.min(cw, ch) / GRID));
-      const gridSize = CELL * GRID;
-      originX = Math.floor((cw - gridSize) / 2);
-      originY = Math.floor((ch - gridSize) / 2);
-
-      // pixel art settings
-      this.cameras.main.setRoundPixels(true);
-      this.cameras.main.setBackgroundColor(0x000000);
-
-      this.redraw();
-    }
-
-    makePixel(key, color){
-      const g = this.add.graphics();
-      g.fillStyle(Phaser.Display.Color.HexStringToColor(color).color, 1);
-      g.fillRect(0,0,16,16);
-      g.generateTexture(key, 16, 16);
-      g.destroy();
-    }
-
-    makeGridTextures(){
-      // minor line
-      {
-        const g = this.add.graphics();
-        g.clear();
-        g.lineStyle(1, 0x22306b, 0.20);
-        g.strokeRect(0,0,16,16);
-        g.generateTexture('grid_minor', 16, 16);
-        g.destroy();
-      }
-      {
-        const g = this.add.graphics();
-        g.clear();
-        g.lineStyle(2, 0x22306b, 0.35);
-        g.strokeRect(0,0,16,16);
-        g.generateTexture('grid_major', 16, 16);
-        g.destroy();
-      }
-    }
-
-    redraw(){
-      const tick = gameState.lastTick;
-
-      // draw grid background via graphics (fast enough for 20x20)
-      this.graphics.clear();
-
-      // subtle vignette background
-      this.graphics.fillStyle(0x000000, 0.18);
-      this.graphics.fillRect(0,0,this.scale.width,this.scale.height);
-
-      // grid lines
-      for (let y=0; y<GRID; y++){
-        for (let x=0; x<GRID; x++){
-          const px = originX + x*CELL;
-          const py = originY + y*CELL;
+    drawGrid(){
+      this.gridG.clear();
+      for (let y=0;y<GRID;y++){
+        for (let x=0;x<GRID;x++){
+          const px = x*CELL;
+          const py = y*CELL;
           const major = (x%5===0) || (y%5===0);
-          const col = major ? 0x22306b : 0x1a2450;
-          const a = major ? 0.22 : 0.12;
-          this.graphics.lineStyle(1, col, a);
-          this.graphics.strokeRect(px, py, CELL, CELL);
+          const line = major ? 0x22306b : 0x1a2450;
+          const a = major ? 0.26 : 0.14;
+          this.gridG.lineStyle(1, line, a);
+          this.gridG.strokeRect(px, py, CELL, CELL);
         }
       }
+    }
 
-      if (!tick) return;
+    renderState(tick){
+      this.dynG.clear();
+      this.uiG.clear();
+
+      if (!tick) {
+        this.uiG.fillStyle(0x000000, 0.35);
+        this.uiG.fillRect(0,0,LOGICAL_SIZE,LOGICAL_SIZE);
+        return;
+      }
 
       // food
-      if (tick.food) {
-        this.placeSprite('food', 'food', tick.food.x, tick.food.y, 1.0);
+      if (tick.food){
+        this.drawCell(tick.food.x, tick.food.y, 0xfb7185, 1.0, true);
       }
 
       // snakes
       for (const p of tick.players){
-        const themeKey = themes[p.color] ? p.color : 'green';
-        const texBody = `snake_${themeKey}_a`;
-        const texHead = `snake_${themeKey}_b`;
+        const th = themes[p.color] || themes.green;
         if (!p.snake || !p.snake.length) continue;
-        for (let i=0; i<p.snake.length; i++){
-          const cell = p.snake[i];
-          const isHead = i === p.snake.length - 1;
-          const tex = isHead ? texHead : texBody;
-          this.placeSprite(`s_${p.id}_${i}`, tex, cell.x, cell.y, isHead ? 1.0 : 0.95);
-        }
-      }
-
-      // cleanup old sprites
-      const keep = new Set();
-      if (tick.food) keep.add('food');
-      for (const p of tick.players){
-        if (!p.snake) continue;
-        for (let i=0;i<p.snake.length;i++) keep.add(`s_${p.id}_${i}`);
-      }
-      for (const [k,s] of this.sprites.entries()){
-        if (!keep.has(k)) {
-          s.destroy();
-          this.sprites.delete(k);
+        for (let i=0;i<p.snake.length;i++){
+          const c = (i === p.snake.length-1) ? th.b : th.a;
+          this.drawCell(p.snake[i].x, p.snake[i].y, c, 1.0, false);
         }
       }
     }
 
-    placeSprite(key, tex, gx, gy, scale=1){
-      const px = originX + gx*CELL + CELL/2;
-      const py = originY + gy*CELL + CELL/2;
-      let s = this.sprites.get(key);
-      if (!s){
-        s = this.add.image(px, py, tex);
-        s.setOrigin(0.5);
-        s.setPipeline('');
-        this.sprites.set(key, s);
+    drawCell(gx, gy, color, alpha=1, glow=false){
+      const px = gx*CELL;
+      const py = gy*CELL;
+      const inset = glow ? 4 : 5;
+      const w = CELL - inset*2;
+      const h = CELL - inset*2;
+      if (glow){
+        this.dynG.fillStyle(color, 0.18);
+        this.dynG.fillRoundedRect(px+2, py+2, CELL-4, CELL-4, 8);
       }
-      s.setTexture(tex);
-      s.setPosition(px, py);
-      const target = (CELL/16) * scale;
-      s.setScale(target);
-      s.setAlpha(1);
-      s.setDepth(10);
+      this.dynG.fillStyle(color, alpha);
+      this.dynG.fillRoundedRect(px+inset, py+inset, w, h, 8);
+      this.dynG.fillStyle(0x000000, 0.12);
+      this.dynG.fillRoundedRect(px+inset+1, py+inset+1, w-2, h-2, 7);
     }
   }
 
   const config = {
     type: Phaser.CANVAS,
     parent: container,
-    width: 640,
-    height: 640,
-    backgroundColor: '#000000',
+    width: LOGICAL_SIZE,
+    height: LOGICAL_SIZE,
+    backgroundColor: '#060812',
     pixelArt: true,
     antialias: false,
     scene: [MainScene],
     fps: { target: 60, forceSetTimeOut: true },
     scale: {
-      mode: Phaser.Scale.NONE,
+      mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
-      width: 640,
-      height: 640,
+      width: LOGICAL_SIZE,
+      height: LOGICAL_SIZE,
     }
   };
 
-  const phaserGame = new Phaser.Game(config);
+  const game = new Phaser.Game(config);
+
+  function scene(){ return game.scene.getScene('main'); }
 
   // ===== Network =====
   const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
   const ws = new WebSocket(wsUrl);
 
-  function wsReady(){ return ws.readyState === WebSocket.OPEN; }
+  const net = {
+    youId: null,
+    room: null,
+    tick: null,
+    tickHz: null,
+    lastRecvAt: 0,
+    lastSendAt: 0,
+    lastPingSentAt: 0,
+    rttMs: null,
+  };
 
-  // Disable controls until ws open
+  function wsReady(){ return ws.readyState === WebSocket.OPEN; }
+  function send(obj){
+    if (!wsReady()) { showToast('网络未连接，稍等…'); return; }
+    ws.send(JSON.stringify(obj));
+  }
+
+  // disable buttons until open
   btnCreate.disabled = true;
   btnJoin.disabled = true;
   btnStart.disabled = true;
@@ -515,57 +427,43 @@
     btnJoin.disabled = true;
     btnStart.disabled = true;
   });
+
   ws.addEventListener('message', (ev) => {
     const msg = JSON.parse(ev.data);
+    net.lastRecvAt = performance.now();
 
     if (msg.t === 'hello') {
-      gameState.youId = msg.id;
+      net.youId = msg.id;
+      net.tickHz = msg.tickHz;
+      elTickHz.textContent = String(msg.tickHz);
       return;
     }
     if (msg.t === 'error') {
       showToast(msg.message || '出错');
       return;
     }
-
     if (msg.t === 'joined' || msg.t === 'players' || msg.t === 'room' || msg.t === 'ended') {
-      gameState.room = msg.room;
+      net.room = msg.room;
       renderRoom();
       return;
     }
-
     if (msg.t === 'state') {
-      gameState.lastTick = msg;
+      net.tick = msg;
       renderRoomLight(msg);
-      // ask Phaser scene to redraw
-      const scene = phaserGame.scene.getScene('main');
-      scene?.redraw?.();
+      // render quickly without creating/destroying sprites
+      scene()?.renderState?.(msg);
       updateHud(msg.players);
       return;
     }
-
     if (msg.t === 'death') {
-      if (msg.id === gameState.youId) showToast('你死了，2秒后复活');
+      if (msg.id === net.youId) showToast('你死了，2秒后复活');
       return;
     }
   });
 
-  function send(obj){
-    if (!wsReady()) {
-      showToast('网络未连接，稍等…');
-      return;
-    }
-    ws.send(JSON.stringify(obj));
-  }
-
-  btnCreate.addEventListener('click', () => {
-    send({ t:'create', name: inpName.value || '玩家', color: inpColor.value });
-  });
-  btnJoin.addEventListener('click', () => {
-    send({ t:'join', code: (inpCode.value||'').trim().toUpperCase(), name: inpName.value || '玩家', color: inpColor.value });
-  });
-  btnStart.addEventListener('click', () => { send({ t:'start' }); });
-
+  // ===== Controls =====
   function setDir(dx,dy){
+    // send immediately (server applies on next tick)
     send({ t:'input', dir:{x:dx,y:dy} });
   }
 
@@ -577,15 +475,21 @@
     else if (k==='arrowright' || k==='d'){ e.preventDefault(); setDir(1,0); }
   }, {passive:false});
 
-  function renderRoom(){
-    if (!gameState.room) return;
-    elRoomCode.textContent = gameState.room.code;
-    elStatus.textContent = gameState.room.state === 'running' ? '进行中' : gameState.room.state === 'ended' ? '已结束' : '大厅';
-    elTimeLeft.textContent = gameState.room.endsAt ? fmtMs(Math.max(0, gameState.room.endsAt - Date.now())) : '—';
+  // ===== UI actions =====
+  btnCreate.addEventListener('click', () => send({ t:'create', name: inpName.value || '玩家', color: inpColor.value }));
+  btnJoin.addEventListener('click', () => send({ t:'join', code: (inpCode.value||'').trim().toUpperCase(), name: inpName.value || '玩家', color: inpColor.value }));
+  btnStart.addEventListener('click', () => send({ t:'start' }));
 
-    const ps = gameState.room.players || [];
+  function renderRoom(){
+    if (!net.room) return;
+    elRoomCode.textContent = net.room.code;
+    elStatus.textContent = net.room.state === 'running' ? '进行中' : net.room.state === 'ended' ? '已结束' : '大厅';
+    elTimeLeft.textContent = net.room.endsAt ? fmtMs(Math.max(0, net.room.endsAt - Date.now())) : '—';
+
+    const ps = net.room.players || [];
     elPlayers.innerHTML = ps.map(p => {
-      const dot = themes[p.color]?.a || '#4ade80';
+      const th = themes[p.color] || themes.green;
+      const dot = '#' + th.a.toString(16).padStart(6,'0');
       const alive = p.alive ? '' : '（复活中）';
       return `<div class="p"><div class="left"><span class="dot" style="background:${dot}"></span><div>${escapeHtml(p.name)} <span class="small">${alive}</span></div></div><div>${p.score}</div></div>`;
     }).join('');
@@ -594,28 +498,19 @@
   }
 
   function renderRoomLight(tick){
-    if (!gameState.room) return;
     elTimeLeft.textContent = tick.endsAt ? fmtMs(Math.max(0, tick.endsAt - Date.now())) : '—';
   }
 
   function updateHud(players){
     const sorted=[...players].sort((a,b)=>b.score-a.score);
-    elHudList.innerHTML = sorted.map((p, i) => {
-      const dot = themes[p.color]?.a || '#4ade80';
-      const you = p.id === gameState.youId;
-      const alive = p.alive ? '' : '（复活）';
-      return `<div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
-        <div style="display:flex; align-items:center; gap:8px; overflow:hidden;">
-          <span style="width:8px;height:8px;border-radius:999px;background:${dot};flex:0 0 auto;"></span>
-          <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${i+1}. ${you?'你·':''}${escapeHtml(p.name)} <span style="color:rgba(154,166,214,.9)">${alive}</span></span>
-        </div>
-        <div style="font-variant-numeric:tabular-nums;">${p.score}</div>
-      </div>`;
-    }).join('');
+    // latency: approximate based on last recv time to now (not true RTT); still useful to see stutter.
+    const age = performance.now() - net.lastRecvAt;
+    elLatency.textContent = isFinite(age) ? `${Math.round(age)}ms` : '—';
   }
 
+  // refresh timer
   setInterval(() => {
-    if (gameState.room?.endsAt) elTimeLeft.textContent = fmtMs(Math.max(0, gameState.room.endsAt - Date.now()));
+    if (net.room?.endsAt) elTimeLeft.textContent = fmtMs(Math.max(0, net.room.endsAt - Date.now()));
   }, 250);
 })();
 </script>

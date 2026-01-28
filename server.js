@@ -30,7 +30,7 @@ function broadcast(room, msg) {
 
 // ===== Game constants =====
 const GRID = 20;
-const TICK_HZ = 12;
+const TICK_HZ = 20;
 const TICK_MS = 1000 / TICK_HZ;
 const ROUND_MS = 120_000;
 
