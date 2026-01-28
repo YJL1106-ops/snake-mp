@@ -314,7 +314,8 @@
       this.sprites = new Map(); // key -> sprite
 
       this.resize();
-      this.scale.on('resize', () => this.resize());
+      // Avoid infinite recursion: we don't call this.scale.resize() from inside resize handler.
+      this.scale.on('resize', () => this.resize(false));
 
       // pointer/touch: swipe input
       this.input.on('pointerdown', (p) => { this._touchStart = {x:p.x, y:p.y, t:performance.now()}; });
@@ -334,17 +335,29 @@
       });
     }
 
-    resize(){
+    resize(requestCanvasResize=true){
       const w = container.clientWidth;
       const h = container.clientHeight;
       // keep square canvas
       const size = Math.floor(Math.min(w, h));
-      this.scale.resize(size, size);
 
-      CELL = Math.floor(size / GRID);
+      // Only resize the canvas when size actually changes.
+      // IMPORTANT: do NOT call this.scale.resize() from inside the scale 'resize' event.
+      if (!this._lastSize) this._lastSize = 0;
+      if (requestCanvasResize && size > 0 && size !== this._lastSize){
+        // Use the Game ScaleManager, not the Scene ScalePlugin, to avoid recursive resize events.
+        this.sys.game.scale.resize(size, size);
+        this._lastSize = size;
+      }
+
+      const canvasSize = this.sys.game.scale.gameSize;
+      const cw = canvasSize.width;
+      const ch = canvasSize.height;
+
+      CELL = Math.max(8, Math.floor(Math.min(cw, ch) / GRID));
       const gridSize = CELL * GRID;
-      originX = Math.floor((size - gridSize) / 2);
-      originY = Math.floor((size - gridSize) / 2);
+      originX = Math.floor((cw - gridSize) / 2);
+      originY = Math.floor((ch - gridSize) / 2);
 
       // pixel art settings
       this.cameras.main.setRoundPixels(true);
@@ -469,6 +482,12 @@
     antialias: false,
     scene: [MainScene],
     fps: { target: 60, forceSetTimeOut: true },
+    scale: {
+      mode: Phaser.Scale.NONE,
+      autoCenter: Phaser.Scale.CENTER_BOTH,
+      width: 640,
+      height: 640,
+    }
   };
 
   const phaserGame = new Phaser.Game(config);
@@ -477,8 +496,25 @@
   const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
   const ws = new WebSocket(wsUrl);
 
-  ws.addEventListener('open', () => { elStatus.textContent = '已连接'; });
-  ws.addEventListener('close', () => { elStatus.textContent = '已断开'; });
+  function wsReady(){ return ws.readyState === WebSocket.OPEN; }
+
+  // Disable controls until ws open
+  btnCreate.disabled = true;
+  btnJoin.disabled = true;
+  btnStart.disabled = true;
+
+  ws.addEventListener('open', () => {
+    elStatus.textContent = '已连接';
+    btnCreate.disabled = false;
+    btnJoin.disabled = false;
+    btnStart.disabled = false;
+  });
+  ws.addEventListener('close', () => {
+    elStatus.textContent = '已断开';
+    btnCreate.disabled = true;
+    btnJoin.disabled = true;
+    btnStart.disabled = true;
+  });
   ws.addEventListener('message', (ev) => {
     const msg = JSON.parse(ev.data);
 
@@ -513,7 +549,13 @@
     }
   });
 
-  function send(obj){ ws.send(JSON.stringify(obj)); }
+  function send(obj){
+    if (!wsReady()) {
+      showToast('网络未连接，稍等…');
+      return;
+    }
+    ws.send(JSON.stringify(obj));
+  }
 
   btnCreate.addEventListener('click', () => {
     send({ t:'create', name: inpName.value || '玩家', color: inpColor.value });
