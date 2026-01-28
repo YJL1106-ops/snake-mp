@@ -282,8 +282,17 @@ function tick(room) {
   // fixed movement speed independent from tick rate
   room.moveAcc += TICK_MS / 1000;
   const step = 1 / room.cps;
-  room.moveAcc = Math.min(room.moveAcc, step * 4);
+  // Avoid bursty multi-steps on lag spikes (bursts feel like "teleport"/missed turns)
+  room.moveAcc = Math.min(room.moveAcc, step * 2);
   while (room.moveAcc >= step) {
+    // Re-apply latest inputs before each logical move step.
+    // This improves turn responsiveness when the server catches up (multiple steps in one tick).
+    for (const p of room.players.values()) {
+      if (!p.alive) continue;
+      const inp = room.inputs.get(p.id);
+      if (inp?.dir) applyInput(p, inp.dir);
+    }
+
     moveStep(room);
     room.moveAcc -= step;
   }
