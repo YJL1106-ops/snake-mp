@@ -343,6 +343,12 @@
         return;
       }
 
+      // Smooth phase inside current cell step (reduces "晃/抖" when packets are uneven).
+      // For self: use prediction accumulator; for others: approximate from time since last packet.
+      // phase: 0..1 progress toward the next cell
+      const selfPhase = predict?.enabled ? Math.max(0, Math.min(1, (predict.accMs / Math.max(1, predict.tickMs)))) : 0;
+      const otherPhase = Math.max(0, Math.min(1, (performance.now() - net.lastRecvAt) / Math.max(1, predict.tickMs)));
+
       // food
       if (tick.food){
         this.drawCell(tick.food.x, tick.food.y, 0xfb7185, 1.0, true);
@@ -352,13 +358,20 @@
       for (const p of tick.players){
         const th = themes[p.color] || themes.green;
         let snake = p.snake;
+        const dir = p.dir || {x:0,y:0};
+        const phase = (predict?.enabled && p.id === window.__YOU_ID) ? selfPhase : otherPhase;
+
+        // Use predicted snake + predicted dir for self (smooth turns)
+        const drawDir = (predict?.enabled && p.id === window.__YOU_ID) ? (predict.dir || dir) : dir;
+
         if (predict?.enabled && p.id === window.__YOU_ID && predict.snake) {
           snake = predict.snake;
         }
         if (!snake || !snake.length) continue;
+
         for (let i=0;i<snake.length;i++){
           const c = (i === snake.length-1) ? th.b : th.a;
-          this.drawCell(snake[i].x, snake[i].y, c, 1.0, false);
+          this.drawCell(snake[i].x + drawDir.x*phase, snake[i].y + drawDir.y*phase, c, 1.0, false);
         }
       }
     }
@@ -412,8 +425,11 @@
     youId: null,
     room: null,
     tick: null,
+    prevTick: null,
     tickHz: null,
     lastRecvAt: 0,
+    rttMs: null,
+    _pingT: 0,
   };
 
   // Client-side prediction (local feel)
@@ -436,6 +452,15 @@
     if (!wsReady()) { showToast('网络未连接，稍等…'); return; }
     ws.send(JSON.stringify(obj));
   }
+
+  // Ping/Pong RTT (so "延迟"不会一直显示 0)
+  function sendPing(){
+    if (!wsReady()) return;
+    const t = performance.now();
+    net._pingT = t;
+    ws.send(JSON.stringify({ t:'ping', ts: t }));
+  }
+  setInterval(sendPing, 1000);
 
   // disable buttons until open
   btnCreate.disabled = true;
@@ -477,7 +502,19 @@
       renderRoom();
       return;
     }
+    if (msg.t === 'pong') {
+      // RTT in ms
+      if (typeof msg.ts === 'number') {
+        const rtt = performance.now() - msg.ts;
+        if (isFinite(rtt) && rtt >= 0) net.rttMs = rtt;
+      } else if (net._pingT) {
+        const rtt = performance.now() - net._pingT;
+        if (isFinite(rtt) && rtt >= 0) net.rttMs = rtt;
+      }
+      return;
+    }
     if (msg.t === 'state') {
+      net.prevTick = net.tick;
       net.tick = msg;
       predict.food = msg.food;
       if (msg.cps) {
@@ -580,9 +617,13 @@
   }
 
   function updateHud(players){
-    // latency: approximate based on last recv time to now (not true RTT); still useful to see stutter.
-    const age = performance.now() - net.lastRecvAt;
-    elLatency.textContent = isFinite(age) ? `${Math.round(age)}ms` : '—';
+    // latency: show measured RTT if available; fallback to "age" (time since last server packet)
+    if (net.rttMs != null) {
+      elLatency.textContent = `${Math.round(net.rttMs)}ms`;
+    } else {
+      const age = performance.now() - net.lastRecvAt;
+      elLatency.textContent = isFinite(age) ? `${Math.round(age)}ms` : '—';
+    }
   }
 
   function predictStepOnce(){

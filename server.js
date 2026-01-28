@@ -426,6 +426,12 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if (msg.t === 'ping') {
+      // echo back for RTT measurement
+      send(ws, { t: 'pong', ts: msg.ts });
+      return;
+    }
+
     if (msg.t === 'input') {
       if (!joinedRoom) return;
       // store last direction per player
